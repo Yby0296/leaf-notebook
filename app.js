@@ -171,6 +171,14 @@
     reviewView: null, // 查看历史的日期
   };
 
+  /* 侧边栏折叠 */
+  function toggleSidebar() {
+    const body = $(".body");
+    const collapsed = body.classList.toggle("collapsed");
+    try { localStorage.setItem("yezi_sidebar", collapsed ? "1" : "0"); } catch (e) {}
+    const tab = $("#collapseTab"); if (tab) tab.setAttribute("aria-label", collapsed ? "展开导航" : "折叠导航");
+  }
+
   /* ---------------- 打卡核心 ---------------- */
   function ensureDay(kind) {
     const t = todayKey();
@@ -451,8 +459,28 @@
     const lib = ENGLISH_LIB[hash(t) % ENGLISH_LIB.length];
     const rec = data.english.days[t] || {};
     const done = !!rec.done;
-    const lines = lib.lines.map(l => `<div class="line"><div class="en">${esc(l.en)}</div><div class="cn">${esc(l.cn)}</div></div>`).join("");
+    const lines = lib.lines.map((l, i) => `
+      <div class="line">
+        <div class="line-txt"><div class="en">${esc(l.en)}</div><div class="cn">${esc(l.cn)}</div></div>
+        <button class="line-play" data-action="speak-en" data-i="${i}" aria-label="播放发音">🔊</button>
+      </div>`).join("");
     const vocab = lib.vocab.map(v => `<div><b>${esc(v.w)}</b> — ${esc(v.m)}</div>`).join("");
+    const targetStr = lib.lines.map(l => l.en).join(" ");
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const support = !!SR;
+    const recBar = support
+      ? `<div class="rec-bar"><button class="rec-btn" id="recBtn" data-action="rec-en"><span class="rec-dot"></span><span id="recLabel">🎤 开始朗读跟读</span></button></div>`
+      : `<div class="rec-bar"><button class="rec-btn" disabled>🎤 当前浏览器不支持语音识别</button></div>`;
+    const unsupported = support ? "" : `<div class="rec-unsupported">💡 你的浏览器暂不支持语音录入。安卓 Chrome 可正常使用；iPhone 的 Safari 暂不支持网页语音识别，可手动在下方调整评分后打卡。</div>`;
+
+    const result = rec.you ? `
+      <div class="rec-result">
+        <div class="rr-h"><span>你的跟读</span><span class="rate-pill">${Math.round((rec.acc + rec.fl + rec.cmp) / 3)} 分</span></div>
+        <div class="rr-you">${diffUser(rec.you, targetStr)}</div>
+        <div class="rr-target">标准：${diffWords(targetStr, rec.you)}</div>
+      </div>` : "";
+
     // 月度统计
     const d = new Date(); const keys = monthKeyList(d.getFullYear(), d.getMonth() + 1);
     let dayCount = 0; const scores = [];
@@ -460,20 +488,25 @@
     const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
     return `
       <div class="module-title">💬 英语口语训练</div>
-      <div class="module-sub">每日生活化场景对话 · 难度循序渐进</div>
+      <div class="module-sub">每日生活化场景对话 · 点喇叭听标准发音，再点麦克风跟读</div>
       <div class="card">
         <div class="dialogue">
-          <div class="scene">📍 ${esc(lib.scene)} · ${t}</div>
+          <div class="scene">📍 ${esc(lib.scene)} · ${t} <span style="float:right;cursor:pointer" class="link-btn" data-action="speak-all">🔊 播放全部</span></div>
           ${lines}
           <div class="vocab"><b>重点词汇 / 句式</b><br>${vocab}</div>
         </div>
+        ${recBar}
+        ${unsupported}
+        ${result}
         <div class="scores">
           ${["acc", "fl", "cmp"].map((k, i) => {
             const labs = ["发音准确度", "流利度", "完整度"];
-            return `<div class="score-box"><div class="sl">${labs[i]}</div><input type="number" min="0" max="100" id="sc_${k}" value="${rec[k] != null ? rec[k] : data.english.lastScore[k] ?? 80}"><div class="sl">分</div></div>`;
+            const val = rec[k] != null ? rec[k] : (data.english.lastScore[k] != null ? data.english.lastScore[k] : 80);
+            return `<div class="score-box"><div class="sl">${labs[i]}</div><input type="number" min="0" max="100" id="sc_${k}" value="${val}"><div class="sl">分</div></div>`;
           }).join("")}
         </div>
-        <button class="btn block" data-action="save-english">${done ? "✓ 已打卡（点击可更新评分）" : "完成跟读并打卡"}</button>
+        <button class="btn block" data-action="save-english">${done ? "✓ 已打卡（可重新跟读或调整评分）" : "完成跟读并打卡"}</button>
+        <div class="rec-hint">提示：跟读得分由语音识别自动计算，可手动微调。</div>
       </div>
       <div class="card">
         <div class="card-h"><div class="t">📈 本月口语统计</div></div>
@@ -483,6 +516,101 @@
         </div>
         ${scores.length ? `<div class="module-sub" style="margin:12px 0 4px">评分趋势</div><div class="progress"><i style="width:${avg}%"></i></div>` : '<div class="empty" style="padding:14px"><span class="em">📉</span>打卡后显示趋势</div>'}
       </div>`;
+  }
+
+  /* 英语发音播放 / 录音识别 / 评分 */
+  function speakText(text) {
+    try {
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "en-US"; u.rate = 0.95; u.pitch = 1;
+      window.speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+  function speakAll(lines) {
+    if (!window.speechSynthesis) { toast("当前浏览器不支持语音播放"); return; }
+    window.speechSynthesis.cancel();
+    let i = 0;
+    const next = () => {
+      if (i >= lines.length) return;
+      const u = new SpeechSynthesisUtterance(lines[i].en);
+      u.lang = "en-US"; u.rate = 0.95; u.pitch = 1;
+      u.onend = () => { i++; setTimeout(next, 350); };
+      window.speechSynthesis.speak(u);
+    };
+    next();
+  }
+  function cleanWord(w) { return w.toLowerCase().replace(/[^a-z']/g, ""); }
+  function scoreReading(target, user, confs) {
+    const tw = target.toLowerCase().split(/\s+/).filter(Boolean).map(cleanWord);
+    const uw = user.toLowerCase().split(/\s+/).filter(Boolean).map(cleanWord);
+    const uwSet = new Set(uw);
+    const matched = tw.filter(w => uwSet.has(w)).length;
+    const cmp = tw.length ? Math.round(matched / tw.length * 100) : 0;
+    const acc = uw.length ? Math.round(matched / uw.length * 100) : 0;
+    const avgConf = (confs && confs.length) ? confs.reduce((a, b) => a + b, 0) / confs.length : (acc / 100);
+    const fl = Math.round(Math.max(0, Math.min(1, avgConf)) * 100);
+    return { acc, fl, cmp };
+  }
+  function diffWords(target, user) {
+    const tw = target.toLowerCase().split(/\s+/).filter(Boolean);
+    const uwSet = new Set(user.toLowerCase().split(/\s+/).filter(Boolean).map(cleanWord));
+    return tw.map(w => {
+      const c = cleanWord(w);
+      return uwSet.has(c) ? `<span class="ok">${esc(w)}</span>` : `<span class="miss">${esc(w)}</span>`;
+    }).join(" ");
+  }
+  function diffUser(user, target) {
+    const twSet = new Set(target.toLowerCase().split(/\s+/).filter(Boolean).map(cleanWord));
+    const arr = user.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!arr.length) return '<span class="extra">（未识别到内容）</span>';
+    return arr.map(w => {
+      const c = cleanWord(w);
+      return twSet.has(c) ? `<span class="ok">${esc(w)}</span>` : `<span class="extra">${esc(w)}</span>`;
+    }).join(" ");
+  }
+  function startEnglishRecord() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { toast("当前浏览器不支持语音识别"); return; }
+    const t = todayKey();
+    const lib = ENGLISH_LIB[hash(t) % ENGLISH_LIB.length];
+    const target = lib.lines.map(l => l.en).join(" ");
+    let recog;
+    try { recog = new SR(); } catch (e) { toast("无法启动语音识别"); return; }
+    recog.lang = "en-US"; recog.interimResults = true; recog.continuous = false; recog.maxAlternatives = 1;
+    let finalTranscript = "", confs = [];
+    const btn = $("#recBtn"), label = $("#recLabel");
+    if (btn) { btn.classList.add("recording"); btn.disabled = true; }
+    if (label) label.textContent = "🎙️ 正在聆听…请朗读";
+    recog.onresult = (ev) => {
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const r = ev.results[i][0];
+        if (r.confidence) confs.push(r.confidence);
+        if (ev.results[i].isFinal) finalTranscript += r.transcript; else interim += r.transcript;
+      }
+      if (label) {
+        const shown = (finalTranscript || interim).trim();
+        label.textContent = shown ? "“" + shown.slice(0, 24) + (shown.length > 24 ? "…" : "") + "”" : "🎙️ 正在聆听…请朗读";
+      }
+    };
+    recog.onerror = (ev) => { toast("语音识别：" + (ev.error || "出错")); };
+    recog.onend = () => {
+      if (btn) { btn.classList.remove("recording"); btn.disabled = false; }
+      if (label) label.textContent = "🎤 开始朗读跟读";
+      const you = finalTranscript.trim();
+      if (!you) { toast("没听清，再试一次~"); render(); return; }
+      const sc = scoreReading(target, you, confs);
+      data.english.lastScore = { acc: sc.acc, fl: sc.fl, cmp: sc.cmp };
+      data.english.days[t] = { acc: sc.acc, fl: sc.fl, cmp: sc.cmp, you, done: true };
+      save(); render(); toast("💬 跟读完成，看看得分~");
+    };
+    try { recog.start(); }
+    catch (e) {
+      toast("无法启动，请检查麦克风权限");
+      if (btn) { btn.classList.remove("recording"); btn.disabled = false; }
+      if (label) label.textContent = "🎤 开始朗读跟读";
+    }
   }
 
   /* ===================================================================
@@ -722,6 +850,7 @@
      事件处理（委托）
      =================================================================== */
   document.addEventListener("click", (e) => {
+    if (e.target.closest("#collapseTab")) { toggleSidebar(); return; }
     const nav = e.target.closest(".nav-item");
     if (nav) { UI.module = nav.dataset.nav; UI.reviewView = null; render(); return; }
     const mode = e.target.closest(".mode-opt");
@@ -789,6 +918,18 @@
       }
 
       /* 英语 */
+      case "speak-en": {
+        const lib = ENGLISH_LIB[hash(todayKey()) % ENGLISH_LIB.length];
+        const line = lib.lines[+el.dataset.i];
+        el.classList.add("speaking");
+        setTimeout(() => el.classList.remove("speaking"), 1300);
+        speakText(line.en); break;
+      }
+      case "speak-all": {
+        const lib = ENGLISH_LIB[hash(todayKey()) % ENGLISH_LIB.length];
+        speakAll(lib.lines); break;
+      }
+      case "rec-en": startEnglishRecord(); break;
       case "save-english": {
         const t = todayKey(); const acc = num($("#sc_acc").value), fl = num($("#sc_fl").value), cmp = num($("#sc_cmp").value);
         data.english.lastScore = { acc, fl, cmp };
@@ -899,6 +1040,8 @@
      =================================================================== */
   load();
   tick(); setInterval(tick, 1000);
+  // 恢复侧边栏折叠状态
+  try { if (localStorage.getItem("yezi_sidebar") === "1") $(".body").classList.add("collapsed"); } catch (e) {}
   render();
   // 当日有预定计划未完成 -> 自动提醒
   const dueNow = (data.plans.items || []).filter(p => p.date === todayKey() && !p.done);
