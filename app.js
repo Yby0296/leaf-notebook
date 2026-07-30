@@ -424,13 +424,16 @@
       const on = !!data.video.learned[v.id];
       return `
       <div class="video-card">
-        <div class="thumb" style="background:${v.color}">${v.emoji}<span class="play">▶</span></div>
+        <div class="thumb" style="background:${v.color}" data-action="watch-video" data-id="${v.id}" title="点开看教程">${v.emoji}<span class="play">▶</span></div>
         <div class="v-body">
           <div class="v-title">${esc(v.title)}</div>
           <div class="v-tag">#${v.tag}</div>
           <div class="v-foot">
             <span class="heat">🔥 ${v.heat}</span>
-            <button class="learn-badge ${on ? "on" : ""}" data-action="toggle-video" data-id="${v.id}">${on ? "已学习" : "标记学习"}</button>
+            <span style="display:flex;gap:8px;align-items:center">
+              <button class="link-btn" data-action="watch-video" data-id="${v.id}">▶ 看教程</button>
+              <button class="learn-badge ${on ? "on" : ""}" data-action="toggle-video" data-id="${v.id}">${on ? "已学习" : "标记学习"}</button>
+            </span>
           </div>
         </div>
       </div>`;
@@ -911,6 +914,12 @@
 
       /* 视频 */
       case "video-tag": UI.videoFilter = el.dataset.tag; render(); break;
+      case "watch-video": {
+        const v = VIDEO_LIB.find(x => x.id === el.dataset.id); if (!v) return;
+        const url = v.url || ("https://search.bilibili.com/all?keyword=" + encodeURIComponent(v.title));
+        toast("正在打开教程…");
+        window.open(url, "_blank"); break;
+      }
       case "toggle-video": {
         const id = el.dataset.id; const t = todayKey();
         if (data.video.learned[id]) delete data.video.learned[id];
