@@ -496,6 +496,19 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
             </span>
             <span class="nav-label">预定计划</span>
           </li>
+          <li class="nav-item" data-nav="daily">
+            <span class="nav-ico" aria-hidden="true">
+              <svg viewBox="0 0 48 48" width="30" height="30">
+                <rect x="11" y="12" width="26" height="26" rx="5" fill="#8FCDE8" stroke="#6BA9CC" stroke-width="1.6"/>
+                <rect x="17" y="9" width="14" height="6" rx="3" fill="#F7A8C0" stroke="#D98AA0" stroke-width="1.6"/>
+                <circle cx="21" cy="24" r="1.4" fill="#5C4A42"/><circle cx="27" cy="24" r="1.4" fill="#5C4A42"/>
+                <path d="M22 27q2.5 2 4 0" stroke="#D98AA0" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+                <circle cx="18.5" cy="26" r="1.6" fill="#F7A8C0" opacity=".8"/><circle cx="29.5" cy="26" r="1.6" fill="#F7A8C0" opacity=".8"/>
+                <path d="M16 32l3 3 5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+            <span class="nav-label">每日任务</span>
+          </li>
         </ul>
 
         <!-- 全局记录模式切换 -->
@@ -685,6 +698,7 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
     learnHist: false, exerHist: false, accCat: "全部", accRange: "month",
     accStart: "", accEnd: "",
     reviewView: null, // 查看历史的日期
+    dailyDate: todayKey(), // 每日任务查看日期
   };
 
   /* 侧边栏折叠 */
@@ -696,29 +710,31 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
   }
 
   /* ---------------- 打卡核心 ---------------- */
-  function ensureDay(kind) {
-    const t = todayKey();
-    if (!data[kind].days[t]) {
-      if (kind === "learning") data[kind].days[t] = { big: [], small: [] };
-      else data[kind].days[t] = [];
+  function ensureDay(kind, d) {
+    d = d || todayKey();
+    if (!data[kind].days[d]) {
+      if (kind === "learning") data[kind].days[d] = { big: [], small: [] };
+      else data[kind].days[d] = [];
     }
-    return data[kind].days[t];
+    return data[kind].days[d];
   }
   // 学习任务
-  function learnDone(sub, id) {
-    if (data.settings.mode === "daily") return (data.learning.days[todayKey()]?.[sub] || []).includes(id);
+  function learnDone(sub, id, d) {
+    d = d || todayKey();
+    if (data.settings.mode === "daily") return (data.learning.days[d]?.[sub] || []).includes(id);
     return !!data.learning.templates[sub].find(t => t.id === id)?.done;
   }
-  function toggleLearn(sub, id) {
+  function toggleLearn(sub, id, d) {
+    d = d || todayKey();
     const tpl = data.learning.templates[sub].find(t => t.id === id);
     if (!tpl) return;
     if (data.settings.mode === "daily") {
-      const arr = ensureDay("learning")[sub];
+      const arr = ensureDay("learning", d)[sub];
       const i = arr.indexOf(id);
       if (i >= 0) arr.splice(i, 1); else arr.push(id);
     } else {
       tpl.done = !tpl.done;
-      const arr = ensureDay("learning")[sub];
+      const arr = ensureDay("learning", d)[sub];
       const i = arr.indexOf(id);
       if (tpl.done && i < 0) arr.push(id);
       else if (!tpl.done && i >= 0) arr.splice(i, 1);
@@ -726,19 +742,21 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
     save(); render();
   }
   // 运动
-  function exerDone(id) {
-    if (data.settings.mode === "daily") return (data.exercise.days[todayKey()] || []).includes(id);
+  function exerDone(id, d) {
+    d = d || todayKey();
+    if (data.settings.mode === "daily") return (data.exercise.days[d] || []).includes(id);
     return !!data.exercise.templates.find(t => t.id === id)?.done;
   }
-  function toggleExer(id) {
+  function toggleExer(id, d) {
+    d = d || todayKey();
     const tpl = data.exercise.templates.find(t => t.id === id);
     if (!tpl) return;
     if (data.settings.mode === "daily") {
-      const arr = ensureDay("exercise"); const i = arr.indexOf(id);
+      const arr = ensureDay("exercise", d); const i = arr.indexOf(id);
       if (i >= 0) arr.splice(i, 1); else arr.push(id);
     } else {
       tpl.done = !tpl.done;
-      const arr = ensureDay("exercise"); const i = arr.indexOf(id);
+      const arr = ensureDay("exercise", d); const i = arr.indexOf(id);
       if (tpl.done && i < 0) arr.push(id); else if (!tpl.done && i >= 0) arr.splice(i, 1);
     }
     save(); render();
@@ -754,7 +772,7 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
     // 模式按钮
     document.querySelectorAll(".mode-opt").forEach(b => b.classList.toggle("active", b.dataset.mode === data.settings.mode));
     // 内容（顶部拼接今日提醒横幅）
-    const map = { learning: renderLearning, exercise: renderExercise, video: renderVideo, english: renderEnglish, account: renderAccount, review: renderReview, plans: renderPlans };
+    const map = { learning: renderLearning, exercise: renderExercise, video: renderVideo, english: renderEnglish, account: renderAccount, review: renderReview, plans: renderPlans, daily: renderDaily };
     const html = (map[UI.module] || renderLearning)();
     content.innerHTML = reminderBanner() + html;
   }
@@ -762,9 +780,20 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
   /* 全局今日提醒横幅：当日有预定计划未完成时展示 */
   function reminderBanner() {
     const t = todayKey();
-    const due = (data.plans.items || []).filter(p => p.date === t && !p.done);
-    if (!due.length) return "";
-    return `<div class="reminder-banner"><span class="bell">🔔</span>今日有 ${due.length} 件预定计划，记得完成哦~</div>`;
+    const inc = [];
+    // 学习任务
+    let lTotal = 0, lDone = 0;
+    ["big", "small"].forEach(sub => data.learning.templates[sub].forEach(tp => { lTotal++; if (learnDone(sub, tp.id, t)) lDone++; }));
+    if (lDone < lTotal) inc.push("学习 " + (lTotal - lDone));
+    // 运动
+    let eTotal = 0, eDone = 0;
+    data.exercise.templates.forEach(tp => { eTotal++; if (exerDone(tp.id, t)) eDone++; });
+    if (eDone < eTotal) inc.push("运动 " + (eTotal - eDone));
+    // 预定
+    const pDue = (data.plans.items || []).filter(p => p.date === t && !p.done).length;
+    if (pDue) inc.push("预定 " + pDue);
+    if (!inc.length) return "";
+    return `<div class="reminder-banner"><span class="bell">🌿</span>今日还有 ${inc.join(" · ")} 项待完成，去「每日任务」打卡吧~</div>`;
   }
 
   /* ---------- 通用片段 ---------- */
@@ -1367,6 +1396,73 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
   }
 
   /* ===================================================================
+     8. 每日任务（汇总各模块当日计划，统一打卡 + 提醒）
+     =================================================================== */
+  function renderDaily() {
+    const d = UI.dailyDate || todayKey();
+    const isToday = d === todayKey();
+
+    // 学习任务（big + small 模板即每日计划）
+    const lItems = [];
+    ["big", "small"].forEach(sub => data.learning.templates[sub].forEach(tp => {
+      lItems.push({ id: tp.id, sub, name: tp.name, done: learnDone(sub, tp.id, d) });
+    }));
+    const lDone = lItems.filter(x => x.done).length;
+
+    // 运动计划（模板即每日计划）
+    const eItems = data.exercise.templates.map(tp => ({ id: tp.id, name: tp.name, done: exerDone(tp.id, d) }));
+    const eDone = eItems.filter(x => x.done).length;
+
+    // 预定计划（日期命中 d）
+    const pItems = (data.plans.items || []).filter(p => p.date === d)
+      .map(p => ({ id: p.id, name: p.title, time: p.time, note: p.note, done: !!p.done }));
+    const pDone = pItems.filter(x => x.done).length;
+
+    const total = lItems.length + eItems.length + pItems.length;
+    const done = lDone + eDone + pDone;
+
+    const sec = (title, icon, items, kind, doneN) => {
+      if (!items.length) return "";
+      const rows = items.map(it => `
+        <div class="item ${it.done ? "done" : ""}">
+          <div class="check" data-action="daily-toggle" data-kind="${kind}" data-sub="${it.sub || ""}" data-id="${it.id}">${checkSvg()}</div>
+          <div class="body">
+            <div class="name">${esc(it.name)}</div>
+            ${it.time ? `<div class="meta">🕐 ${esc(it.time)}${it.note ? " · " + esc(it.note) : ""}</div>` : (it.note ? `<div class="meta">${esc(it.note)}</div>` : "")}
+          </div>
+        </div>`).join("");
+      return `
+        <div class="card">
+          <div class="card-h"><div class="t"><span class="dot dot-pink"></span>${icon} ${title}</div><span class="rate-pill">${doneN}/${items.length}</span></div>
+          ${rows}
+        </div>`;
+    };
+
+    let banner = "";
+    if (isToday) {
+      if (done < total) banner = `<div class="reminder-banner"><span class="bell">🌿</span>今日还有 ${total - done} 项任务待完成，加油哦~</div>`;
+      else if (total > 0) banner = `<div class="reminder-banner" style="background:var(--blue-deep)"><span class="bell">✅</span>今日任务已全部完成，太棒啦！</div>`;
+    }
+
+    return `
+      <div class="module-title">📋 每日任务</div>
+      <div class="module-sub">把当天各模块的计划汇总在一起，统一打卡</div>
+      <div class="card">
+        <div class="card-h"><div class="t">📅 选择日期</div><span class="rate-pill">${done}/${total}</span></div>
+        <div class="add-form">
+          <input class="f-sel" id="daily_date" type="date" value="${d}" style="flex:1 1 100%" />
+        </div>
+        ${!isToday ? `<div class="module-sub" style="margin:6px 0 0">查看 ${d}（${weekdayCn(parseKey(d))}）的任务</div>` : ""}
+      </div>
+      ${banner}
+      ${sec("学习任务", "📚", lItems, "learning", lDone)}
+      ${sec("运动计划", "🏃", eItems, "exercise", eDone)}
+      ${sec("预定计划", "📅", pItems, "plan", pDone)}
+      ${total === 0 ? '<div class="empty"><span class="em">📭</span>这天还没有任何任务，去各模块添加吧</div>' : ""}
+    `;
+  }
+
+  /* ===================================================================
      事件处理（委托）
      =================================================================== */
   document.addEventListener("click", (e) => {
@@ -1508,6 +1604,19 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
       case "hist-review": UI.reviewView = "__list"; renderReviewList(); break;
       case "back-review": UI.reviewView = null; render(); break;
 
+      /* 每日任务 */
+      case "daily-toggle": {
+        const kind = el.dataset.kind;
+        const view = UI.dailyDate || todayKey();
+        if (kind === "learning") toggleLearn(el.dataset.sub, el.dataset.id, view);
+        else if (kind === "exercise") toggleExer(el.dataset.id, view);
+        else if (kind === "plan") {
+          const p = data.plans.items.find(x => x.id === el.dataset.id);
+          if (p) { p.done = !p.done; save(); render(); }
+        }
+        break;
+      }
+
       /* 预定计划 */
       case "add-plan": {
         const title = $("#pl_title").value.trim();
@@ -1551,6 +1660,7 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
   document.addEventListener("change", (e) => {
     if (e.target.id === "acc_start") { UI.accStart = e.target.value; render(); }
     if (e.target.id === "acc_end") { UI.accEnd = e.target.value; render(); }
+    if (e.target.id === "daily_date") { UI.dailyDate = e.target.value || todayKey(); render(); }
   });
 
   /* ===================================================================
