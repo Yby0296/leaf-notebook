@@ -803,11 +803,11 @@
      =================================================================== */
   function renderPlans() {
     const t = todayKey();
-    const items = data.plans.items.slice().sort((a, b) => a.date.localeCompare(b.date));
+    const items = data.plans.items.slice().sort((a, b) => a.date.localeCompare(b.date) || (a.time || "").localeCompare(b.time || ""));
     const list = items.map(p => {
       const isToday = p.date === t;
       const diff = dateDiff(t, p.date);
-      const badge = isToday ? "今天" : (diff > 0 ? "还有 " + diff + " 天" : "已过期");
+      const badge = isToday ? (p.time ? "今天 " + p.time : "今天") : (diff > 0 ? "还有 " + diff + " 天" : "已过期");
       const bColor = isToday ? "var(--pink)" : "#ECE6DE";
       const bInk = isToday ? "#7a5c52" : "#9A8678";
       return `
@@ -815,7 +815,7 @@
         <div class="check" data-action="toggle-plan" data-id="${p.id}">${checkSvg()}</div>
         <div class="body">
           <div class="name">${esc(p.title)}</div>
-          <div class="meta">📅 ${p.date}　${weekdayCn(parseKey(p.date))}${p.note ? " · " + esc(p.note) : ""}</div>
+          <div class="meta">📅 ${p.date}${p.time ? " 🕐" + esc(p.time) : ""}　${weekdayCn(parseKey(p.date))}${p.note ? " · " + esc(p.note) : ""}</div>
         </div>
         <div class="ops">
           <span class="rate-pill" style="background:${bColor};color:${bInk}">${badge}</span>
@@ -825,18 +825,19 @@
     }).join("");
     return `
       <div class="module-title">📅 预定计划</div>
-      <div class="module-sub">提前预约未来安排，到当天会自动提醒并展示</div>
+      <div class="module-sub">提前预约未来安排（可填具体时间），到当天会自动提醒并展示</div>
       <div class="card">
         <div class="card-h"><div class="t"><span class="dot dot-pink"></span>添加预定</div></div>
         <div class="add-form">
           <input class="f-name" id="pl_title" placeholder="计划内容，如：和朋友看展" />
           <input class="f-sel" id="pl_date" type="date" value="${t}" />
+          <input class="f-sel" id="pl_time" type="time" />
           <input class="f-name" id="pl_note" placeholder="备注（可选）" />
           <button class="btn" data-action="add-plan">+ 预定</button>
         </div>
       </div>
       <div class="card">
-        <div class="card-h"><div class="t">📋 全部预定（按日期）</div></div>
+        <div class="card-h"><div class="t">📋 全部预定（按日期 / 时间）</div></div>
         ${items.length ? list : '<div class="empty"><span class="em">🗓️</span>还没有预定，先添加一个吧</div>'}
       </div>`;
   }
@@ -986,11 +987,12 @@
       case "add-plan": {
         const title = $("#pl_title").value.trim();
         const date = $("#pl_date").value;
+        const time = $("#pl_time").value;
         const note = $("#pl_note").value.trim();
         if (!title || !date) { toast("请填写内容并选择日期~"); return; }
-        data.plans.items.push({ id: uid(), title, date, note, done: false });
+        data.plans.items.push({ id: uid(), title, date, time, note, done: false });
         save(); render();
-        toast(date === todayKey() ? "🔔 已加入今日提醒" : "📅 已预定 " + date + " 的计划"); break;
+        toast(date === todayKey() ? "🔔 已加入今日提醒" : "📅 已预定 " + date + (time ? " " + time : "") + " 的计划"); break;
       }
       case "toggle-plan": {
         const p = data.plans.items.find(x => x.id === el.dataset.id); if (!p) return;
@@ -1001,8 +1003,9 @@
         const p = data.plans.items.find(x => x.id === el.dataset.id); if (!p) return;
         const title = prompt("修改计划内容", p.title); if (title === null) return;
         const date = prompt("修改日期 (YYYY-MM-DD)", p.date); if (date === null) return;
+        const time = prompt("修改时间 (HH:MM，可留空)", p.time || ""); if (time === null) return;
         const note = prompt("修改备注", p.note || ""); if (note === null) return;
-        p.title = title.trim() || p.title; p.date = date.trim() || p.date; p.note = note; save(); render(); break;
+        p.title = title.trim() || p.title; p.date = date.trim() || p.date; p.time = time.trim(); p.note = note; save(); render(); break;
       }
     }
   }
