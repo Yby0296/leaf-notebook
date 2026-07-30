@@ -364,3 +364,18 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
   .nav-ico{ width:38px; height:38px; }
   .clock-date{ display:none; }
 }
+
+/* ============ 提前预约 / 模块标签 ============ */
+.mod-chip{
+  display:inline-block; font-size:10.5px; font-weight:800; line-height:1;
+  padding:3px 7px; border-radius:8px; margin-right:6px; vertical-align:1px;
+  background:var(--blue); color:#3d6474; white-space:nowrap;
+}
+.mod-chip.book{ background:var(--pink); color:#7a5c52; }
+.item.booked{ background:linear-gradient(90deg,rgba(247,168,192,.14),transparent); border-radius:12px; }
+
+.book-card{ border:1.5px dashed var(--blue); }
+.quick-days{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; }
+.quick-days .tag{ font-size:11.5px; padding:4px 10px; cursor:pointer; }
+.quick-days .tag:active{ transform:scale(.94); }
+.hint-txt{ font-size:11px; color:#A79587; margin-right:2px; }

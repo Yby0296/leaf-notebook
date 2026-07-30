@@ -373,6 +373,21 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
   .clock-date{ display:none; }
 }
 
+/* ============ 提前预约 / 模块标签 ============ */
+.mod-chip{
+  display:inline-block; font-size:10.5px; font-weight:800; line-height:1;
+  padding:3px 7px; border-radius:8px; margin-right:6px; vertical-align:1px;
+  background:var(--blue); color:#3d6474; white-space:nowrap;
+}
+.mod-chip.book{ background:var(--pink); color:#7a5c52; }
+.item.booked{ background:linear-gradient(90deg,rgba(247,168,192,.14),transparent); border-radius:12px; }
+
+.book-card{ border:1.5px dashed var(--blue); }
+.quick-days{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; }
+.quick-days .tag{ font-size:11.5px; padding:4px 10px; cursor:pointer; }
+.quick-days .tag:active{ transform:scale(.94); }
+.hint-txt{ font-size:11px; color:#A79587; margin-right:2px; }
+
 </style>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -648,6 +663,8 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
         data = deepMerge(defaultData(), data);
       } else data = defaultData();
     } catch (e) { data = defaultData(); }
+    // 兼容旧数据：预定计划补上模块标签
+    try { (data.plans.items || []).forEach(p => { if (!p.module) p.module = "general"; }); } catch (e) {}
     rolloverCheck();
     save();
   }
@@ -693,6 +710,48 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
   function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
   function money(n) { return (Math.round(n * 100) / 100).toLocaleString("zh-CN"); }
   function hash(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0; return h; }
+  function addDaysKey(key, n) { const d = parseKey(key); d.setDate(d.getDate() + n); return ymd(d); }
+  function tomorrowKey() { return addDaysKey(todayKey(), 1); }
+
+  /* ---------------- 模块标签（预定计划归属） ---------------- */
+  const MODULES = [
+    { k: "learning", n: "学习任务", i: "📚" },
+    { k: "exercise", n: "运动计划", i: "🏃" },
+    { k: "video", n: "视频剪辑", i: "🎬" },
+    { k: "english", n: "英语口语", i: "🗣️" },
+    { k: "account", n: "记账理财", i: "💰" },
+    { k: "review", n: "每日复盘", i: "📝" },
+    { k: "general", n: "其他安排", i: "🌿" },
+  ];
+  function moduleMeta(k) { return MODULES.find(m => m.k === k) || MODULES[MODULES.length - 1]; }
+
+  /* 通用「预约到某天」卡片：各模块复用 */
+  function bookCard(mod, placeholder) {
+    const tm = tomorrowKey();
+    return `
+      <div class="card book-card">
+        <div class="card-h"><div class="t"><span class="dot dot-blue"></span>⏰ 提前预约</div><span class="rate-pill" style="background:var(--blue);color:#3d6474">明天 ${tm.slice(5)}</span></div>
+        <div class="module-sub" style="margin:0 0 8px">预约后会在当天的「每日任务」里置顶提醒</div>
+        <div class="add-form">
+          <input class="f-name" id="bk_title" placeholder="${esc(placeholder)}" />
+          <input class="f-sel" id="bk_date" type="date" value="${tm}" />
+          <input class="f-sel" id="bk_time" type="time" />
+          <button class="btn" data-action="book-module" data-module="${mod}">+ 预约</button>
+        </div>
+        <div class="quick-days">
+          <span class="tag" data-action="book-quick" data-day="0">今天</span>
+          <span class="tag" data-action="book-quick" data-day="1">明天</span>
+          <span class="tag" data-action="book-quick" data-day="2">后天</span>
+          <span class="tag" data-action="book-quick" data-day="7">下周</span>
+        </div>
+      </div>`;
+  }
+  /* 创建一条带模块标签的预定 */
+  function createPlan(mod, title, date, time, note) {
+    data.plans.items.push({ id: uid(), title, date, time: time || "", note: note || "", module: mod || "general", done: false });
+    save();
+    toast(date === todayKey() ? "🔔 已加入今日任务" : "📅 已预约 " + date + (time ? " " + time : "") + "：" + title);
+  }
 
   /* ---------------- 提示 ---------------- */
   let toastTimer = null;
@@ -786,7 +845,7 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
     // 内容（顶部拼接今日提醒横幅）
     const map = { learning: renderLearning, exercise: renderExercise, video: renderVideo, english: renderEnglish, account: renderAccount, review: renderReview, plans: renderPlans, daily: renderDaily };
     const html = (map[UI.module] || renderLearning)();
-    content.innerHTML = reminderBanner() + html;
+    content.innerHTML = (UI.module === "daily" ? "" : reminderBanner()) + html;
   }
 
   /* 全局今日提醒横幅：当日有预定计划未完成时展示 */
@@ -803,9 +862,11 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
     if (eDone < eTotal) inc.push("运动 " + (eTotal - eDone));
     // 预定
     const pDue = (data.plans.items || []).filter(p => p.date === t && !p.done).length;
-    if (pDue) inc.push("预定 " + pDue);
-    if (!inc.length) return "";
-    return `<div class="reminder-banner"><span class="bell">🌿</span>今日还有 ${inc.join(" · ")} 项待完成，去「每日任务」打卡吧~</div>`;
+    if (pDue) inc.push("预约 " + pDue);
+    const tmrN = (data.plans.items || []).filter(p => p.date === tomorrowKey()).length;
+    const tmrTip = tmrN ? `<div class="reminder-banner" style="background:var(--blue)"><span class="bell">🌙</span>明天已预约 ${tmrN} 项，安排得明明白白~</div>` : "";
+    if (!inc.length) return tmrTip;
+    return `<div class="reminder-banner"><span class="bell">🌿</span>今日还有 ${inc.join(" · ")} 项待完成，去「每日任务」打卡吧~</div>` + tmrTip;
   }
 
   /* ---------- 通用片段 ---------- */
@@ -853,7 +914,14 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
         <div class="add-form">
           <input class="f-name" id="ln_${sub}" placeholder="任务说明，如：完成第三章初稿" />
           <input class="f-num" id="le_${sub}" type="number" min="0" placeholder="时长(分)" />
+          <input class="f-sel" id="ld_${sub}" type="date" placeholder="日期（可选）" title="留空=每天固定任务；选日期=只预约那天" />
           <button class="btn" data-action="add-learning" data-sub="${sub}">+ 添加</button>
+        </div>
+        <div class="quick-days">
+          <span class="hint-txt">日期留空 = 每天固定任务</span>
+          <span class="tag" data-action="learn-quick" data-sub="${sub}" data-day="1">预约明天</span>
+          <span class="tag" data-action="learn-quick" data-sub="${sub}" data-day="2">后天</span>
+          <span class="tag" data-action="learn-quick" data-sub="${sub}" data-day="-1">清空</span>
         </div>
         <div class="stat-row" style="margin-top:12px">
           <div class="stat-chip"><div class="n">${month.days}</div><div class="l">本月打卡天数</div></div>
@@ -941,7 +1009,14 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
           <input class="f-name" id="ex_name" placeholder="运动项目，如：拉伸/力量训练" />
           <input class="f-num" id="ex_target" type="number" min="0" placeholder="时长(分)" />
           <input class="f-num" id="ex_count" type="number" min="1" placeholder="组数" />
+          <input class="f-sel" id="ex_date" type="date" placeholder="日期（可选）" title="留空=每天固定项目；选日期=只预约那天" />
           <button class="btn" data-action="add-exercise">+ 添加项目</button>
+        </div>
+        <div class="quick-days">
+          <span class="hint-txt">日期留空 = 每天固定项目</span>
+          <span class="tag" data-action="exer-quick" data-day="1">预约明天</span>
+          <span class="tag" data-action="exer-quick" data-day="2">后天</span>
+          <span class="tag" data-action="exer-quick" data-day="-1">清空</span>
         </div>
         <div class="stat-row" style="margin-top:12px">
           <div class="stat-chip"><div class="n">${todayMins}</div><div class="l">今日时长(分)</div></div>
@@ -1003,6 +1078,7 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
         <div class="progress"><i style="width:${prog}%"></i></div>
         <div class="module-sub" style="margin:2px 0 0">累计已学 ${learnedCount}/${VIDEO_LIB.length} · 本月 ${monthLearned} 条</div>
       </div>
+      ${bookCard("video", "明天要学的剪辑技巧，如：学转场卡点")}
       <div class="tags">
         <span class="tag ${f === "全部" ? "active" : ""}" data-action="video-tag" data-tag="全部">全部</span>
         ${VIDEO_TAGS.map(t => `<span class="tag ${f === t ? "active" : ""}" data-action="video-tag" data-tag="${t}">${t}</span>`).join("")}
@@ -1049,6 +1125,7 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
     return `
       <div class="module-title">💬 英语口语训练</div>
       <div class="module-sub">每日生活化场景对话 · 点喇叭听标准发音，再点麦克风跟读</div>
+      ${bookCard("english", "明天的口语目标，如：练机场值机对话")}
       <div class="card">
         <div class="dialogue">
           <div class="scene">📍 ${esc(lib.scene)} · ${t} <span style="float:right;cursor:pointer" class="link-btn" data-action="speak-all">🔊 播放全部</span></div>
@@ -1215,6 +1292,7 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
     return `
       <div class="module-title">👛 我的账户</div>
       <div class="module-sub">存款与开支，本地留存更安心</div>
+      ${bookCard("account", "明天的财务安排，如：交房租 / 只花50元")}
 
       <div class="card">
         <div class="card-h"><div class="t"><span class="dot dot-pink"></span>存款记录</div></div>
@@ -1302,6 +1380,7 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
     return `
       <div class="module-title">📝 每日复盘</div>
       <div class="module-sub">${t} · ${weekdayCn(new Date())} 的小结</div>
+      ${bookCard("review", "给明天的自己留一句话/提醒")}
 
       <div class="card">
         <div class="card-h"><div class="t">💗 情绪洞察</div></div>
@@ -1370,11 +1449,12 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
       const badge = isToday ? (p.time ? "今天 " + p.time : "今天") : (diff > 0 ? "还有 " + diff + " 天" : "已过期");
       const bColor = isToday ? "var(--pink)" : "#ECE6DE";
       const bInk = isToday ? "#7a5c52" : "#9A8678";
+      const mm = moduleMeta(p.module);
       return `
       <div class="item ${p.done ? "done" : ""}">
         <div class="check" data-action="toggle-plan" data-id="${p.id}">${checkSvg()}</div>
         <div class="body">
-          <div class="name">${esc(p.title)}</div>
+          <div class="name"><span class="mod-chip">${mm.i} ${mm.n}</span>${esc(p.title)}</div>
           <div class="meta">📅 ${p.date}${p.time ? " 🕐" + esc(p.time) : ""}　${weekdayCn(parseKey(p.date))}${p.note ? " · " + esc(p.note) : ""}</div>
         </div>
         <div class="ops">
@@ -1385,15 +1465,24 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
     }).join("");
     return `
       <div class="module-title">📅 预定计划</div>
-      <div class="module-sub">提前预约未来安排（可填具体时间），到当天会自动提醒并展示</div>
+      <div class="module-sub">提前预约未来安排（可选模块 + 具体时间），到当天会在「每日任务」对应板块置顶提醒</div>
       <div class="card">
         <div class="card-h"><div class="t"><span class="dot dot-pink"></span>添加预定</div></div>
         <div class="add-form">
           <input class="f-name" id="pl_title" placeholder="计划内容，如：和朋友看展" />
-          <input class="f-sel" id="pl_date" type="date" value="${t}" />
+          <select class="f-sel" id="pl_module">
+            ${MODULES.map(m => `<option value="${m.k}"${m.k === "general" ? " selected" : ""}>${m.i} ${m.n}</option>`).join("")}
+          </select>
+          <input class="f-sel" id="pl_date" type="date" value="${tomorrowKey()}" />
           <input class="f-sel" id="pl_time" type="time" />
           <input class="f-name" id="pl_note" placeholder="备注（可选）" />
           <button class="btn" data-action="add-plan">+ 预定</button>
+        </div>
+        <div class="quick-days">
+          <span class="tag" data-action="plan-quick" data-day="0">今天</span>
+          <span class="tag" data-action="plan-quick" data-day="1">明天</span>
+          <span class="tag" data-action="plan-quick" data-day="2">后天</span>
+          <span class="tag" data-action="plan-quick" data-day="7">下周</span>
         </div>
       </div>
       <div class="card">
@@ -1414,38 +1503,44 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
     const d = UI.dailyDate || todayKey();
     const isToday = d === todayKey();
 
-    // 学习任务（big + small 模板即每日计划）
-    const lItems = [];
+    // 当天的预定计划，按模块归类
+    const dayPlans = (data.plans.items || []).filter(p => p.date === d);
+    const planOf = k => dayPlans.filter(p => (p.module || "general") === k)
+      .sort((a, b) => (a.time || "99").localeCompare(b.time || "99"))
+      .map(p => ({ kind: "plan", id: p.id, name: p.title, time: p.time, note: p.note, booked: true, done: !!p.done }));
+
+    // 各板块：预定项置顶 + 日常模板
+    const groups = [];
+
+    const lTpl = [];
     ["big", "small"].forEach(sub => data.learning.templates[sub].forEach(tp => {
-      lItems.push({ id: tp.id, sub, name: tp.name, done: learnDone(sub, tp.id, d) });
+      lTpl.push({ kind: "learning", id: tp.id, sub, name: tp.name, done: learnDone(sub, tp.id, d) });
     }));
-    const lDone = lItems.filter(x => x.done).length;
+    groups.push({ k: "learning", items: planOf("learning").concat(lTpl) });
 
-    // 运动计划（模板即每日计划）
-    const eItems = data.exercise.templates.map(tp => ({ id: tp.id, name: tp.name, done: exerDone(tp.id, d) }));
-    const eDone = eItems.filter(x => x.done).length;
+    const eTpl = data.exercise.templates.map(tp => ({ kind: "exercise", id: tp.id, name: tp.name, done: exerDone(tp.id, d) }));
+    groups.push({ k: "exercise", items: planOf("exercise").concat(eTpl) });
 
-    // 预定计划（日期命中 d）
-    const pItems = (data.plans.items || []).filter(p => p.date === d)
-      .map(p => ({ id: p.id, name: p.title, time: p.time, note: p.note, done: !!p.done }));
-    const pDone = pItems.filter(x => x.done).length;
+    ["video", "english", "account", "review", "general"].forEach(k => groups.push({ k, items: planOf(k) }));
 
-    const total = lItems.length + eItems.length + pItems.length;
-    const done = lDone + eDone + pDone;
+    let total = 0, done = 0;
+    groups.forEach(g => { total += g.items.length; done += g.items.filter(x => x.done).length; });
 
-    const sec = (title, icon, items, kind, doneN) => {
-      if (!items.length) return "";
-      const rows = items.map(it => `
-        <div class="item ${it.done ? "done" : ""}">
-          <div class="check" data-action="daily-toggle" data-kind="${kind}" data-sub="${it.sub || ""}" data-id="${it.id}">${checkSvg()}</div>
+    const sec = (g) => {
+      if (!g.items.length) return "";
+      const mm = moduleMeta(g.k);
+      const doneN = g.items.filter(x => x.done).length;
+      const rows = g.items.map(it => `
+        <div class="item ${it.done ? "done" : ""}${it.booked ? " booked" : ""}">
+          <div class="check" data-action="daily-toggle" data-kind="${it.kind}" data-sub="${it.sub || ""}" data-id="${it.id}">${checkSvg()}</div>
           <div class="body">
-            <div class="name">${esc(it.name)}</div>
+            <div class="name">${it.booked ? '<span class="mod-chip book">预约</span>' : ""}${esc(it.name)}</div>
             ${it.time ? `<div class="meta">🕐 ${esc(it.time)}${it.note ? " · " + esc(it.note) : ""}</div>` : (it.note ? `<div class="meta">${esc(it.note)}</div>` : "")}
           </div>
         </div>`).join("");
       return `
         <div class="card">
-          <div class="card-h"><div class="t"><span class="dot dot-pink"></span>${icon} ${title}</div><span class="rate-pill">${doneN}/${items.length}</span></div>
+          <div class="card-h"><div class="t"><span class="dot dot-pink"></span>${mm.i} ${mm.n}</div><span class="rate-pill">${doneN}/${g.items.length}</span></div>
           ${rows}
         </div>`;
     };
@@ -1454,23 +1549,34 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
     if (isToday) {
       if (done < total) banner = `<div class="reminder-banner"><span class="bell">🌿</span>今日还有 ${total - done} 项任务待完成，加油哦~</div>`;
       else if (total > 0) banner = `<div class="reminder-banner" style="background:var(--blue-deep)"><span class="bell">✅</span>今日任务已全部完成，太棒啦！</div>`;
+    } else {
+      const bk = dayPlans.length;
+      if (bk) banner = `<div class="reminder-banner" style="background:var(--blue)"><span class="bell">📌</span>${d === tomorrowKey() ? "明天" : d} 已预约 ${bk} 项，到当天会自动提醒</div>`;
     }
+
+    // 明天预约速览
+    const tmr = (data.plans.items || []).filter(p => p.date === tomorrowKey());
+    const tmrTip = (isToday && tmr.length) ? `<div class="card"><div class="card-h"><div class="t"><span class="dot dot-blue"></span>🌙 明天已预约</div><span class="rate-pill" style="background:var(--blue);color:#3d6474">${tmr.length} 项</span></div>${tmr.map(p => `<div class="item"><div class="body"><div class="name"><span class="mod-chip">${moduleMeta(p.module).i} ${moduleMeta(p.module).n}</span>${esc(p.title)}</div>${p.time ? `<div class="meta">🕐 ${esc(p.time)}</div>` : ""}</div></div>`).join("")}</div>` : "";
 
     return `
       <div class="module-title">📋 每日任务</div>
-      <div class="module-sub">把当天各模块的计划汇总在一起，统一打卡</div>
+      <div class="module-sub">把当天各模块的计划汇总在一起，统一打卡；预约的事项会置顶到对应板块</div>
       <div class="card">
         <div class="card-h"><div class="t">📅 选择日期</div><span class="rate-pill">${done}/${total}</span></div>
         <div class="add-form">
           <input class="f-sel" id="daily_date" type="date" value="${d}" style="flex:1 1 100%" />
         </div>
+        <div class="quick-days">
+          <span class="tag ${isToday ? "active" : ""}" data-action="daily-quick" data-day="0">今天</span>
+          <span class="tag ${d === tomorrowKey() ? "active" : ""}" data-action="daily-quick" data-day="1">明天</span>
+          <span class="tag ${d === addDaysKey(todayKey(), 2) ? "active" : ""}" data-action="daily-quick" data-day="2">后天</span>
+        </div>
         ${!isToday ? `<div class="module-sub" style="margin:6px 0 0">查看 ${d}（${weekdayCn(parseKey(d))}）的任务</div>` : ""}
       </div>
       ${banner}
-      ${sec("学习任务", "📚", lItems, "learning", lDone)}
-      ${sec("运动计划", "🏃", eItems, "exercise", eDone)}
-      ${sec("预定计划", "📅", pItems, "plan", pDone)}
-      ${total === 0 ? '<div class="empty"><span class="em">📭</span>这天还没有任何任务，去各模块添加吧</div>' : ""}
+      ${groups.map(sec).join("")}
+      ${total === 0 ? '<div class="empty"><span class="em">📭</span>这天还没有任何任务，去各模块预约吧</div>' : ""}
+      ${tmrTip}
     `;
   }
 
@@ -1495,9 +1601,16 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
       case "add-learning": {
         const sub = el.dataset.sub; const name = $("#ln_" + sub).value.trim();
         const est = num($("#le_" + sub).value);
+        const bd = $("#ld_" + sub) ? $("#ld_" + sub).value : "";
         if (!name) { toast("先写点任务说明吧~"); return; }
+        if (bd) { createPlan("learning", name + (est ? "（" + est + "分钟）" : ""), bd, "", ""); render(); break; }
         data.learning.templates[sub].push({ id: uid(), name, est, done: false });
         save(); render(); break;
+      }
+      case "learn-quick": {
+        const n = parseInt(el.dataset.day, 10);
+        const inp = $("#ld_" + el.dataset.sub); if (inp) inp.value = n < 0 ? "" : addDaysKey(todayKey(), n);
+        break;
       }
       case "toggle-learning": toggleLearn(el.dataset.sub, el.dataset.id); break;
       case "del-learning": {
@@ -1519,8 +1632,15 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
       /* 运动 */
       case "add-exercise": {
         const name = $("#ex_name").value.trim(); const target = num($("#ex_target").value); const count = Math.max(1, num($("#ex_count").value) || 1);
+        const bd = $("#ex_date") ? $("#ex_date").value : "";
         if (!name) { toast("先填运动项目~"); return; }
+        if (bd) { createPlan("exercise", name + (target ? "（" + target + "分钟" + (count > 1 ? "×" + count + "组" : "") + "）" : ""), bd, "", ""); render(); break; }
         data.exercise.templates.push({ id: uid(), name, target, count, done: false }); save(); render(); break;
+      }
+      case "exer-quick": {
+        const n = parseInt(el.dataset.day, 10);
+        const inp = $("#ex_date"); if (inp) inp.value = n < 0 ? "" : addDaysKey(todayKey(), n);
+        break;
       }
       case "toggle-exercise": toggleExer(el.dataset.id); break;
       case "del-exercise": {
@@ -1617,6 +1737,9 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
       case "back-review": UI.reviewView = null; render(); break;
 
       /* 每日任务 */
+      case "daily-quick": {
+        UI.dailyDate = addDaysKey(todayKey(), parseInt(el.dataset.day, 10) || 0); render(); break;
+      }
       case "daily-toggle": {
         const kind = el.dataset.kind;
         const view = UI.dailyDate || todayKey();
@@ -1635,10 +1758,31 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
         const date = $("#pl_date").value;
         const time = $("#pl_time").value;
         const note = $("#pl_note").value.trim();
+        const mod = $("#pl_module") ? $("#pl_module").value : "general";
         if (!title || !date) { toast("请填写内容并选择日期~"); return; }
-        data.plans.items.push({ id: uid(), title, date, time, note, done: false });
-        save(); render();
-        toast(date === todayKey() ? "🔔 已加入今日提醒" : "📅 已预定 " + date + (time ? " " + time : "") + " 的计划"); break;
+        createPlan(mod, title, date, time, note);
+        render(); break;
+      }
+      case "plan-quick": {
+        const n = parseInt(el.dataset.day, 10) || 0;
+        const inp = $("#pl_date"); if (inp) inp.value = addDaysKey(todayKey(), n);
+        break;
+      }
+      /* 各模块「提前预约」 */
+      case "book-module": {
+        const mod = el.dataset.module;
+        const title = ($("#bk_title") || {}).value ? $("#bk_title").value.trim() : "";
+        const date = ($("#bk_date") || {}).value || "";
+        const time = ($("#bk_time") || {}).value || "";
+        if (!title) { toast("先写下要做什么吧~"); return; }
+        if (!date) { toast("请选择日期~"); return; }
+        createPlan(mod, title, date, time, "");
+        render(); break;
+      }
+      case "book-quick": {
+        const n = parseInt(el.dataset.day, 10) || 0;
+        const inp = $("#bk_date"); if (inp) inp.value = addDaysKey(todayKey(), n);
+        break;
       }
       case "toggle-plan": {
         const p = data.plans.items.find(x => x.id === el.dataset.id); if (!p) return;
@@ -1651,6 +1795,8 @@ textarea.note{ width:100%; min-height:74px; resize:vertical; }
         const date = prompt("修改日期 (YYYY-MM-DD)", p.date); if (date === null) return;
         const time = prompt("修改时间 (HH:MM，可留空)", p.time || ""); if (time === null) return;
         const note = prompt("修改备注", p.note || ""); if (note === null) return;
+        const mod = prompt("所属模块（learning/exercise/video/english/account/review/general）", p.module || "general");
+        if (mod !== null && MODULES.some(m => m.k === mod.trim())) p.module = mod.trim();
         p.title = title.trim() || p.title; p.date = date.trim() || p.date; p.time = time.trim(); p.note = note; save(); render(); break;
       }
     }
